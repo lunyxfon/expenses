@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+
+  <!-- Viewport: без зума, с учётом "чёлки" и закруглённых углов iPhone -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+
+  <!-- PWA-метатеги для iPhone -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Расходы">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="format-detection" content="telephone=no">
+
+  <!-- Иконка для экрана "Домой" (SVG-эмодзи, встроенная прямо в файл) -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%237c3aed'/%3E%3Ctext x='90' y='122' font-size='100' text-anchor='middle'%3E💰%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E💰%3C/text%3E%3C/svg%3E">
+
+  <title>Трекер расходов</title>
+
+  <!-- Chart.js через CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* ===== Переменные цветов ===== */
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --card-2: #273449;
+      --border: rgba(148, 163, 184, 0.14);
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #8b5cf6;
+      --accent-2: #6366f1;
+      --danger: #f43f5e;
+      --radius: 18px;
+    }
+
+    /* ===== Базовые стили ===== */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent; /* убираем серую подсветку при тапе */
+    }
+
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      /* SF-подобный системный шрифт */
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+                   "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-text-size-adjust: 100%;
+      touch-action: manipulation; /* отключает зум по двойному тапу */
+      overscroll-behavior-y: none;
+    }
+
+    body {
+      min-height: 100vh;
+      /* Отступы под "чёлку" и полоску "Домой" */
+      padding: calc(env(safe-area-inset-top) + 12px)
+               calc(env(safe-area-inset-right) + 16px)
+               calc(env(safe-area-inset-bottom) + 24px)
+               calc(env(safe-area-inset-left) + 16px);
+    }
+
+    .app {
+      max-width: 560px;
+      margin: 0 auto;
+    }
+
+    /* ===== Заголовок ===== */
+    header {
+      padding: 8px 4px 16px;
+    }
+
+    .date {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    h1 {
+      font-size: 34px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-top: 2px;
+    }
+
+    /* ===== Карточка с общей суммой ===== */
+    .total-card {
+      background: linear-gradient(135deg, #7c3aed 0%, #6366f1 55%, #a855f7 100%);
+      border-radius: 24px;
+      padding: 22px 22px 20px;
+      box-shadow: 0 12px 32px rgba(124, 58, 237, 0.35);
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Декоративный блик на карточке */
+    .total-card::after {
+      content: "";
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      right: -70px;
+      top: -90px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .total-label {
+      font-size: 15px;
+      opacity: 0.85;
+      font-weight: 500;
+    }
+
+    .total-amount {
+      font-size: 40px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-top: 6px;
+      word-break: break-word;
+    }
+
+    .total-count {
+      font-size: 14px;
+      opacity: 0.8;
+      margin-top: 4px;
+    }
+
+    /* ===== Секции ===== */
+    .section-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 24px 4px 10px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    /* ===== Форма ===== */
+    .field {
+      margin-bottom: 12px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0 4px 6px;
+      font-weight: 500;
+    }
+
+    .input,
+    .select {
+      width: 100%;
+      height: 52px;
+      background: var(--card-2);
+      border: 1px solid transparent;
+      border-radius: 14px;
+      color: var(--text);
+      padding: 0 16px;
+      /* 16px+ — иначе iOS зумит страницу при фокусе на поле */
+      font-size: 17px;
+      font-family: inherit;
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+      transition: border-color 0.15s;
+    }
+
+    .input::placeholder {
+      color: #64748b;
+    }
+
+    .input:focus,
+    .select:focus {
+      border-color: var(--accent);
+    }
+
+    /* Стрелочка для выпадающего списка */
+    .select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 16px center;
+      padding-right: 40px;
+    }
+
+    .amount-wrap {
+      position: relative;
+    }
+
+    .amount-wrap .input {
+      padding-right: 44px;
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .amount-wrap .currency {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 20px;
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    .btn {
+      width: 100%;
+      height: 54px;
+      border: none;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+      font-size: 17px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      margin-top: 4px;
+      transition: transform 0.1s, opacity 0.1s;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+      opacity: 0.85;
+    }
+
+    .error {
+      color: var(--danger);
+      font-size: 13px;
+      margin: 6px 4px 0;
+      min-height: 0;
+      display: none;
+    }
+
+    .error.show {
+      display: block;
+    }
+
+    /* ===== Графики ===== */
+    .chart-card {
+      margin-bottom: 12px;
+    }
+
+    .chart-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .chart-box {
+      position: relative;
+      height: 240px;
+    }
+
+    .chart-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 15px;
+      text-align: center;
+      padding: 0 20px;
+    }
+
+    /* ===== Список расходов ===== */
+    .list {
+      list-style: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 8px 12px 14px;
+      min-height: 68px;
+      animation: fadeIn 0.25s ease;
+    }
+
+    .item + .item {
+      border-top: 1px solid var(--border);
+    }
+
+    .item-emoji {
+      flex: 0 0 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--card-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+
+    .item-info {
+      flex: 1;
+      min-width: 0; /* чтобы длинная заметка обрезалась многоточием */
+    }
+
+    .item-cat {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .item-meta {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .item-amount {
+      font-size: 16px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .item-del {
+      flex: 0 0 44px;
+      height: 44px;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      border-radius: 12px;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .item-del:active {
+      background: rgba(244, 63, 94, 0.15);
+      color: var(--danger);
+    }
+
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 36px 16px;
+      font-size: 15px;
+    }
+
+    .empty-emoji {
+      font-size: 40px;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    /* ===== Всплывающее уведомление ===== */
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(env(safe-area-inset-bottom) + 24px);
+      transform: translate(-50%, 120px);
+      background: rgba(30, 41, 59, 0.96);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 999px;
+      font-size: 15px;
+      font-weight: 500;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      transition: transform 0.3s cubic-bezier(.2, .9, .3, 1.2);
+      z-index: 10;
+      white-space: nowrap;
+    }
+
+    .toast.show {
+      transform: translate(-50%, 0);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+
+    <!-- Заголовок с текущей датой -->
+    <header>
+      <div class="date" id="today"></div>
+      <h1>Расходы</h1>
+    </header>
+
+    <!-- Карточка с общей суммой -->
+    <div class="total-card">
+      <div class="total-label">Всего потрачено</div>
+      <div class="total-amount" id="total">0 ₽</div>
+      <div class="total-count" id="count">Нет записей</div>
+    </div>
+
+    <!-- Форма добавления расхода -->
+    <div class="section-title">Новый расход</div>
+    <form class="card" id="form" autocomplete="off" novalidate>
+      <div class="field">
+        <label for="amount">Сумма</label>
+        <div class="amount-wrap">
+          <input class="input" id="amount" type="text" inputmode="decimal" placeholder="0" enterkeyhint="done">
+          <span class="currency">₽</span>
+        </div>
+        <div class="error" id="error">Введите сумму больше нуля</div>
+      </div>
+
+      <div class="field">
+        <label for="category">Категория</label>
+        <select class="select" id="category"></select>
+      </div>
+
+      <div class="field">
+        <label for="note">Заметка (необязательно)</label>
+        <input class="input" id="note" type="text" maxlength="100" placeholder="Например, обед в кафе" enterkeyhint="done">
+      </div>
+
+      <button class="btn" type="submit">Добавить расход</button>
+    </form>
+
+    <!-- Графики -->
+    <div class="section-title">Статистика</div>
+
+    <div class="card chart-card">
+      <div class="chart-title">По категориям</div>
+      <div class="chart-box">
+        <canvas id="doughnutChart"></canvas>
+        <div class="chart-empty" id="doughnutEmpty">Пока нет данных</div>
+      </div>
+    </div>
+
+    <div class="card chart-card">
+      <div class="chart-title">За последние 7 дней</div>
+      <div class="chart-box">
+        <canvas id="barChart"></canvas>
+        <div class="chart-empty" id="barEmpty">Пока нет данных</div>
+      </div>
+    </div>
+
+    <!-- Список расходов -->
+    <div class="section-title">История</div>
+    <ul class="list" id="list"></ul>
+  </div>
+
+  <!-- Уведомление -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ================================================================
+    //  НАСТРОЙКИ
+    // ================================================================
+
+    // Ключ, под которым данные хранятся в localStorage
+    const STORAGE_KEY = 'expense-tracker-v1';
+
+    // Категории: название, эмодзи и цвет для графиков
+    const CATEGORIES = [
+      { id: 'food',      name: 'Еда',          emoji: '🍔', color: '#f97316' },
+      { id: 'transport', name: 'Транспорт',    emoji: '🚗', color: '#3b82f6' },
+      { id: 'fun',       name: 'Развлечения',  emoji: '🎮', color: '#a855f7' },
+      { id: 'home',      name: 'Дом',          emoji: '🏠', color: '#10b981' },
+      { id: 'health',    name: 'Здоровье',     emoji: '💊', color: '#ef4444' },
+      { id: 'clothes',   name: 'Одежда',       emoji: '👕', color: '#eab308' },
+      { id: 'other',     name: 'Другое',       emoji: '📦', color: '#64748b' }
+    ];
+
+    // Быстрый поиск категории по id
+    const CAT_BY_ID = Object.fromEntries(CATEGORIES.map(c => [c.id, c]));
+
+    // ================================================================
+    //  ЭЛЕМЕНТЫ СТРАНИЦЫ
+    // ================================================================
+
+    const el = {
+      today:     document.getElementById('today'),
+      total:     document.getElementById('total'),
+      count:     document.getElementById('count'),
+      form:      document.getElementById('form'),
+      amount:    document.getElementById('amount'),
+      category:  document.getElementById('category'),
+      note:      document.getElementById('note'),
+      error:     document.getElementById('error'),
+      list:      document.getElementById('list'),
+      toast:     document.getElementById('toast'),
+      doughnutEmpty: document.getElementById('doughnutEmpty'),
+      barEmpty:  document.getElementById('barEmpty')
+    };
+
+    // Массив всех расходов: { id, amount, category, note, date (ISO-строка) }
+    let expenses = loadExpenses();
+
+    // Объекты графиков Chart.js
+    let doughnutChart = null;
+    let barChart = null;
+
+    // ================================================================
+    //  ХРАНЕНИЕ ДАННЫХ (localStorage)
+    // ================================================================
+
+    // Загрузка расходов из localStorage
+    function loadExpenses() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const data = raw ? JSON.parse(raw) : [];
+        return Array.isArray(data) ? data : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    // Сохранение расходов в localStorage
+    function saveExpenses() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
+      } catch (e) {
+        showToast('⚠️ Не удалось сохранить данные');
+      }
+    }
+
+    // ================================================================
+    //  ФОРМАТИРОВАНИЕ
+    // ================================================================
+
+    // Сумма в рублях: 12 345,5 ₽
+    function formatMoney(value) {
+      return value.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ₽';
+    }
+
+    // Делает первую букву заглавной
+    function capitalize(str) {
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    // Дата для списка: "Сегодня, 14:05", "Вчера, 09:30" или "12 октября, 18:00"
+    function formatItemDate(iso) {
+      const d = new Date(iso);
+      const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      const today = startOfDay(new Date());
+      const day = startOfDay(d);
+      const diffDays = Math.round((today - day) / 86400000);
+
+      if (diffDays === 0) return 'Сегодня, ' + time;
+      if (diffDays === 1) return 'Вчера, ' + time;
+
+      const sameYear = d.getFullYear() === new Date().getFullYear();
+      const date = d.toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: sameYear ? undefined : 'numeric'
+      });
+      return date + ', ' + time;
+    }
+
+    // Начало дня (00:00) для даты
+    function startOfDay(date) {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+
+    // Правильное склонение: 1 запись, 2 записи, 5 записей
+    function plural(n, one, few, many) {
+      const mod10 = n % 10;
+      const mod100 = n % 100;
+      if (mod10 === 1 && mod100 !== 11) return one;
+      if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+      return many;
+    }
+
+    // ================================================================
+    //  ОТРИСОВКА ИНТЕРФЕЙСА
+    // ================================================================
+
+    // Заголовок с текущей датой: "Четверг, 15 октября"
+    function renderToday() {
+      const text = new Date().toLocaleDateString('ru-RU', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long'
+      });
+      el.today.textContent = capitalize(text);
+    }
+
+    // Заполнение выпадающего списка категорий
+    function renderCategoryOptions() {
+      el.category.innerHTML = '';
+      CATEGORIES.forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat.id;
+        option.textContent = cat.emoji + '  ' + cat.name;
+        el.category.appendChild(option);
+      });
+    }
+
+    // Карточка с общей суммой
+    function renderTotal() {
+      const sum = expenses.reduce((acc, e) => acc + e.amount, 0);
+      el.total.textContent = formatMoney(sum);
+      const n = expenses.length;
+      el.count.textContent = n === 0
+        ? 'Нет записей'
+        : n + ' ' + plural(n, 'запись', 'записи', 'записей');
+    }
+
+    // Список расходов (новые сверху)
+    function renderList() {
+      el.list.innerHTML = '';
+
+      if (expenses.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'empty';
+        empty.innerHTML = '<span class="empty-emoji">🧾</span>Расходов пока нет.<br>Добавьте первый!';
+        el.list.appendChild(empty);
+        return;
+      }
+
+      // Сортируем по дате: новые сверху
+      const sorted = [...expenses].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      sorted.forEach(exp => {
+        const cat = CAT_BY_ID[exp.category] || CAT_BY_ID.other;
+
+        const li = document.createElement('li');
+        li.className = 'item';
+
+        // Эмодзи категории
+        const emoji = document.createElement('div');
+        emoji.className = 'item-emoji';
+        emoji.textContent = cat.emoji;
+
+        // Категория, дата и заметка
+        const info = document.createElement('div');
+        info.className = 'item-info';
+
+        const catName = document.createElement('div');
+        catName.className = 'item-cat';
+        catName.textContent = cat.name;
+
+        const meta = document.createElement('div');
+        meta.className = 'item-meta';
+        // textContent защищает от вставки HTML через заметку
+        meta.textContent = formatItemDate(exp.date) + (exp.note ? ' · ' + exp.note : '');
+
+        info.append(catName, meta);
+
+        // Сумма
+        const amount = document.createElement('div');
+        amount.className = 'item-amount';
+        amount.textContent = '−' + formatMoney(exp.amount);
+
+        // Кнопка удаления
+        const del = document.createElement('button');
+        del.className = 'item-del';
+        del.type = 'button';
+        del.setAttribute('aria-label', 'Удалить');
+        del.textContent = '🗑';
+        del.addEventListener('click', () => deleteExpense(exp.id));
+
+        li.append(emoji, info, amount, del);
+        el.list.appendChild(li);
+      });
+    }
+
+    // ================================================================
+    //  ГРАФИКИ (Chart.js)
+    // ================================================================
+
+    // Общие настройки Chart.js под тёмную тему
+    function setupChartDefaults() {
+      Chart.defaults.color = '#94a3b8';
+      Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+      Chart.defaults.font.size = 12;
+      Chart.defaults.borderColor = 'rgba(148, 163, 184, 0.12)';
+    }
+
+    // Общие настройки всплывающих подсказок
+    const tooltipStyle = {
+      backgroundColor: '#0f172a',
+      borderColor: 'rgba(148, 163, 184, 0.25)',
+      borderWidth: 1,
+      padding: 10,
+      cornerRadius: 10,
+      displayColors: false
+    };
+
+    // Круговая диаграмма: траты по категориям
+    function renderDoughnut() {
+      // Суммируем траты по каждой категории
+      const totals = CATEGORIES.map(cat =>
+        expenses.filter(e => e.category === cat.id).reduce((acc, e) => acc + e.amount, 0)
+      );
+
+      // Оставляем только категории, где есть траты
+      const used = CATEGORIES
+        .map((cat, i) => ({ cat, total: totals[i] }))
+        .filter(x => x.total > 0);
+
+      el.doughnutEmpty.style.display = used.length ? 'none' : 'flex';
+
+      const data = {
+        labels: used.map(x => x.cat.emoji + ' ' + x.cat.name),
+        datasets: [{
+          data: used.map(x => x.total),
+          backgroundColor: used.map(x => x.cat.color),
+          borderColor: '#1e293b',
+          borderWidth: 3,
+          hoverOffset: 6
+        }]
+      };
+
+      if (doughnutChart) {
+        doughnutChart.data = data;
+        doughnutChart.update();
+        return;
+      }
+
+      doughnutChart = new Chart(document.getElementById('doughnutChart'), {
+        type: 'doughnut',
+        data,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '62%',
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: {
+                boxWidth: 10,
+                boxHeight: 10,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                padding: 10,
+                color: '#cbd5e1'
+              }
+            },
+            tooltip: {
+              ...tooltipStyle,
+              callbacks: {
+                label: ctx => {
+                  const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                  const pct = sum ? Math.round(ctx.parsed / sum * 100) : 0;
+                  return formatMoney(ctx.parsed) + ' (' + pct + '%)';
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Столбчатая диаграмма: траты за последние 7 дней
+    function renderBar() {
+      const labels = [];
+      const values = [];
+      const today = startOfDay(new Date());
+
+      // Идём от 6 дней назад до сегодня
+      for (let i = 6; i >= 0; i--) {
+        const day = new Date(today);
+        day.setDate(today.getDate() - i);
+        const next = new Date(day);
+        next.setDate(day.getDate() + 1);
+
+        // Подпись в две строки: "Пн" / "13"
+        const weekday = day.toLocaleDateString('ru-RU', { weekday: 'short' });
+        labels.push([capitalize(weekday), String(day.getDate())]);
+
+        // Сумма трат за этот день
+        const sum = expenses
+          .filter(e => {
+            const d = new Date(e.date);
+            return d >= day && d < next;
+          })
+          .reduce((acc, e) => acc + e.amount, 0);
+        values.push(sum);
+      }
+
+      el.barEmpty.style.display = values.some(v => v > 0) ? 'none' : 'flex';
+
+      // Сегодняшний столбец выделяем ярче
+      const colors = values.map((_, i) => i === 6 ? '#a78bfa' : 'rgba(139, 92, 246, 0.55)');
+
+      if (barChart) {
+        barChart.data.labels = labels;
+        barChart.data.datasets[0].data = values;
+        barChart.data.datasets[0].backgroundColor = colors;
+        barChart.update();
+        return;
+      }
+
+      barChart = new Chart(document.getElementById('barChart'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderRadius: 8,
+            borderSkipped: false,
+            maxBarThickness: 32
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              ...tooltipStyle,
+              callbacks: {
+                label: ctx => formatMoney(ctx.parsed.y)
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              // Подписи дней — горизонтально и без пропусков
+              ticks: { maxRotation: 0, autoSkip: false, font: { size: 11 } }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                maxTicksLimit: 5,
+                callback: v => v.toLocaleString('ru-RU') + ' ₽'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Перерисовка обоих графиков (если Chart.js загрузился)
+    function renderCharts() {
+      if (typeof Chart === 'undefined') {
+        el.doughnutEmpty.textContent = 'Графики недоступны без интернета';
+        el.barEmpty.textContent = 'Графики недоступны без интернета';
+        el.doughnutEmpty.style.display = 'flex';
+        el.barEmpty.style.display = 'flex';
+        return;
+      }
+      renderDoughnut();
+      renderBar();
+    }
+
+    // Полная перерисовка всего интерфейса
+    function renderAll() {
+      renderTotal();
+      renderList();
+      renderCharts();
+    }
+
+    // ================================================================
+    //  ДЕЙСТВИЯ
+    // ================================================================
+
+    // Добавление нового расхода
+    function addExpense(event) {
+      event.preventDefault();
+
+      // Разрешаем ввод через запятую: "250,50" → 250.5
+      const raw = el.amount.value.replace(/\s/g, '').replace(',', '.');
+      const amount = Math.round(parseFloat(raw) * 100) / 100;
+
+      if (!isFinite(amount) || amount <= 0) {
+        el.error.classList.add('show');
+        el.amount.focus();
+        return;
+      }
+      el.error.classList.remove('show');
+
+      expenses.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+        amount,
+        category: el.category.value,
+        note: el.note.value.trim(),
+        date: new Date().toISOString()
+      });
+
+      saveExpenses();
+      renderAll();
+
+      // Очищаем форму, категорию оставляем — удобно вводить подряд
+      el.amount.value = '';
+      el.note.value = '';
+      el.amount.blur();
+      el.note.blur();
+
+      showToast('✅ Расход добавлен');
+    }
+
+    // Удаление расхода с подтверждением
+    function deleteExpense(id) {
+      const exp = expenses.find(e => e.id === id);
+      if (!exp) return;
+
+      const cat = CAT_BY_ID[exp.category] || CAT_BY_ID.other;
+      if (!confirm('Удалить расход «' + cat.name + '» на ' + formatMoney(exp.amount) + '?')) return;
+
+      expenses = expenses.filter(e => e.id !== id);
+      saveExpenses();
+      renderAll();
+      showToast('🗑 Расход удалён');
+    }
+
+    // Короткое всплывающее уведомление внизу экрана
+    let toastTimer = null;
+    function showToast(text) {
+      el.toast.textContent = text;
+      el.toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.toast.classList.remove('show'), 1800);
+    }
+
+    // ================================================================
+    //  ЗАПУСК
+    // ================================================================
+
+    // Дополнительная защита от зума жестом "щипок" в Safari
+    document.addEventListener('gesturestart', e => e.preventDefault());
+
+    // Защита от зума двойным тапом (для старых версий iOS)
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', e => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) e.preventDefault();
+      lastTouchEnd = now;
+    }, { passive: false });
+
+    // Скрываем ошибку, как только пользователь начал вводить сумму
+    el.amount.addEventListener('input', () => el.error.classList.remove('show'));
+
+    el.form.addEventListener('submit', addExpense);
+
+    if (typeof Chart !== 'undefined') setupChartDefaults();
+
+    renderToday();
+    renderCategoryOptions();
+    renderAll();
+
+    // Если приложение было открыто всю ночь — обновляем дату и график при возвращении
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        renderToday();
+        renderCharts();
+      }
+    });
+  </script>
+</body>
+</html>
